@@ -1,6 +1,6 @@
 import requests
 
-API_KEY = "REMOVED_EXPOSED_API_KEY"
+API_KEY = ""
 url = "https://api.deepseek.com/v1/chat/completions"
 headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
