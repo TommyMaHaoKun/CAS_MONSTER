@@ -1,6 +1,6 @@
 import requests
 
-API_KEY = "sk-d746a5ab081c439eaa6952d5368b10e6"
+API_KEY = ""
 url = "https://api.deepseek.com/v1/chat/completions"
 headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
