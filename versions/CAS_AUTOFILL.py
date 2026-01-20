@@ -1,4 +1,4 @@
-import threading
+﻿import threading
 import queue
 import re
 import time
@@ -283,12 +283,20 @@ def generate_reflection_summary_deepseek(
     api_key: str,
     club_name: str,
     title: str,
+    club_desc: str = "",
+    reflection_desc: str = "",
     model: str = "deepseek-chat",
 ) -> str:
+    extra_context = ""
+    if club_desc:
+        extra_context += f"Club description: {club_desc}\n"
+    if reflection_desc:
+        extra_context += f"Reflection focus: {reflection_desc}\n"
     user_content = (
     f"Write a concise English summary for an IB CAS reflection.\n"
     f"Club: {club_name}\n"
     f"Title: {title}\n\n"
+    f"{extra_context}"
     f"Hard output rules (MUST follow):\n"
     f"- Output ONLY ONE sentence and NOTHING ELSE.\n"
     f"- Do NOT add 'Summary:' or any label, no quotes, no extra whitespace lines.\n"
@@ -334,12 +342,20 @@ def generate_reflection_content_deepseek(
     api_key: str,
     club_name: str,
     title: str,
+    club_desc: str = "",
+    reflection_desc: str = "",
     model: str = "deepseek-chat",
 ) -> str:
+    extra_context = ""
+    if club_desc:
+        extra_context += f"Club description: {club_desc}\n"
+    if reflection_desc:
+        extra_context += f"Reflection focus: {reflection_desc}\n"
     user_content = (
     f"Write an IB CAS Activity Reflection in English.\n"
     f"Club: {club_name}\n"
     f"Title: {title}\n\n"
+    f"{extra_context}"
     f"Hard output rules (MUST follow):\n"
     f"- Output ONLY the reflection body text.\n"
     f"- Do NOT add a title, labels (e.g., 'Reflection:'), section headers, prefaces, explanations, or word counts.\n"
@@ -677,7 +693,7 @@ class V42App(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("WFLA CAS Autofill - V4.3.0 (Records + Reflection + Weekly Batch)")
+        self.title("WFLA CAS Autofill - V4.3.1 (Records + Reflection + Weekly Batch)")
         self.geometry("1400x900")
         self.minsize(1240, 820)
 
@@ -883,7 +899,7 @@ class V42App(tk.Tk):
         self._row(lf_batch, 3, "Start date", build_batch_start_picker)
         self._row(lf_batch, 4, "End date", build_batch_end_picker)
         self._row(
-            lf_batch, 5, "Periodic activity (optional)",
+            lf_batch, 5, "Periodic activity\n(optional)",
             lambda p: ttk.Entry(p, textvariable=self.var_batch_periodic, width=34)
         )
         def build_hours_batch(p):
@@ -914,13 +930,30 @@ class V42App(tk.Tk):
         lf_ref.pack(fill="x")
 
         self.var_ref_club = tk.StringVar()
-        self.var_ref_title = tk.StringVar(value="")
+        self.var_ref_count = tk.StringVar(value="1")
+        self.var_ref_club_desc = tk.StringVar(value="")
 
         self.combo_ref_club = self._row(
             lf_ref, 0, "Club",
             lambda p: ttk.Combobox(p, textvariable=self.var_ref_club, width=31, state="readonly", values=[])
         )
-        self._row(lf_ref, 1, "Title", lambda p: ttk.Entry(p, textvariable=self.var_ref_title, width=34))
+        self._row(lf_ref, 1, "Number of reflections", lambda p: ttk.Entry(p, textvariable=self.var_ref_count, width=34))
+        self._row(lf_ref, 2, "Club description", lambda p: ttk.Entry(p, textvariable=self.var_ref_club_desc, width=34))
+
+        ttk.Label(lf_ref, text="Titles (one per line)", width=20).grid(row=4, column=0, sticky="w", pady=4)
+        titles_frame = ttk.Frame(lf_ref)
+        titles_frame.grid(row=4, column=1, sticky="ew", pady=4)
+        lf_ref.columnconfigure(1, weight=1)
+        self.txt_ref_titles = tk.Text(titles_frame, height=4, wrap="word")
+        self.txt_ref_titles.pack(fill="both", expand=True)
+
+        ttk.Label(lf_ref, text="Reflection descriptions\n(optional, one per line)", width=20).grid(
+            row=5, column=0, sticky="w", pady=4
+        )
+        desc_frame = ttk.Frame(lf_ref)
+        desc_frame.grid(row=5, column=1, sticky="ew", pady=4)
+        self.txt_ref_desc = tk.Text(desc_frame, height=4, wrap="word")
+        self.txt_ref_desc.pack(fill="both", expand=True)
 
         # Learning outcomes selector
         outcomes_box = ttk.Labelframe(tab_ref, text="Learning Outcome", padding=10)
@@ -994,7 +1027,7 @@ class V42App(tk.Tk):
         footer.pack(fill="x", pady=(10, 0))
         self.btn_stop = ttk.Button(footer, text="Close browser (manual)", command=self.on_hint_stop)
         self.btn_stop.pack(side="left")
-        ttk.Label(footer, text="V4.3.0 - Records + Reflection + Weekly Batch (DeepSeek)").pack(side="left", padx=(12, 0))
+        ttk.Label(footer, text="V4.3.1 - Records + Reflection + Weekly Batch (DeepSeek)").pack(side="left", padx=(12, 0))
 
     # ---------- logging / previews ----------
 
@@ -1110,15 +1143,32 @@ class V42App(tk.Tk):
 
     def _validate_reflection(self):
         club = self.var_ref_club.get().strip()
-        title = self.var_ref_title.get().strip()
+        count_raw = self.var_ref_count.get().strip()
+        club_desc = self.var_ref_club_desc.get().strip()
         if not club:
             raise ValueError("Please fetch and select a club (Reflection).")
-        if not title:
-            raise ValueError("Title cannot be empty.")
+        if not count_raw.isdigit() or int(count_raw) <= 0:
+            raise ValueError("Number of reflections must be a positive integer.")
+        count = int(count_raw)
+        if not club_desc:
+            raise ValueError("Club description cannot be empty.")
+        titles_raw = self.txt_ref_titles.get("1.0", "end").strip()
+        titles = [t.strip() for t in titles_raw.splitlines() if t.strip()]
+        if not titles:
+            raise ValueError("Please input at least one title (one per line).")
+        if len(titles) != count:
+            raise ValueError("Number of titles must match the number of reflections.")
+
+        desc_raw = self.txt_ref_desc.get("1.0", "end").strip()
+        desc_lines = [d.strip() for d in desc_raw.splitlines() if d.strip()]
+        if desc_lines and len(desc_lines) != count:
+            raise ValueError("Reflection descriptions must match the number of reflections.")
+        if not desc_lines:
+            desc_lines = [""] * count
         selected = [k for k, v in self.outcome_vars.items() if v.get()]
         if not selected:
             raise ValueError("Select at least one Learning Outcome.")
-        return club, title, selected
+        return club, club_desc, desc_lines, titles, selected
 
     def _set_buttons_running(self, running: bool):
         state = "disabled" if running else "normal"
@@ -1473,13 +1523,13 @@ class V42App(tk.Tk):
             return
         try:
             user, pw, key = self._validate_account()
-            club, title, selected = self._validate_reflection()
+            club, club_desc, desc_lines, titles, selected = self._validate_reflection()
         except Exception as e:
             messagebox.showerror("Invalid input", str(e))
             return
 
         self._set_buttons_running(True)
-        self._log("[Reflection] Run started: generating summary + reflection + autofilling...")
+        self._log(f"[Reflection] Run started: {len(titles)} reflections.")
 
         def task():
             try:
@@ -1489,65 +1539,77 @@ class V42App(tk.Tk):
 
                     login_and_wait_home(page, user, pw)
                     refl_list_ctx = open_reflection_list_ctx(page)
-                    add_ctx = open_add_reflection_ctx(refl_list_ctx, page)
 
-                    self._log(f"[Reflection] Selecting club: {club}")
-                    select_club_by_text(add_ctx, club)
+                    total = len(titles)
+                    for idx, title in enumerate(titles, start=1):
+                        reflection_desc = desc_lines[idx - 1]
+                        self._log(f"[Reflection] ({idx}/{total}) Opening add dialog...")
+                        add_ctx = open_add_reflection_ctx(refl_list_ctx, page)
 
-                    # Title
-                    add_ctx.locator("input[name='Title']").fill(title)
+                        self._log(f"[Reflection] ({idx}/{total}) Selecting club: {club}")
+                        select_club_by_text(add_ctx, club)
 
-                    # DeepSeek generation
-                    self._log("[Reflection] Calling DeepSeek to generate 20-word summary...")
-                    summary = generate_reflection_summary_deepseek(
-                        api_key=key,
-                        club_name=club,
-                        title=title,
-                        model="deepseek-chat",
-                    )
-                    self._log("[Reflection] Summary generated.")
+                        # Title
+                        add_ctx.locator("input[name='Title']").fill(title)
 
-                    self._log("[Reflection] Calling DeepSeek to generate >= 550-word reflection...")
-                    reflection_text = generate_reflection_content_deepseek(
-                        api_key=key,
-                        club_name=club,
-                        title=title,
-                        model="deepseek-chat",
-                    )
-                    self._log("[Reflection] Reflection generated.")
-                    self._set_preview_reflection(summary, reflection_text)
+                        # DeepSeek generation
+                        self._log(f"[Reflection] ({idx}/{total}) Generating 20-word summary...")
+                        summary = generate_reflection_summary_deepseek(
+                            api_key=key,
+                            club_name=club,
+                            title=title,
+                            club_desc=club_desc,
+                            reflection_desc=reflection_desc,
+                            model="deepseek-chat",
+                        )
+                        self._log(f"[Reflection] ({idx}/{total}) Summary generated.")
 
-                    # Fill Content Summary
-                    add_ctx.locator("textarea[name='Summary']").fill(summary)
+                        self._log(f"[Reflection] ({idx}/{total}) Generating reflection content...")
+                        reflection_text = generate_reflection_content_deepseek(
+                            api_key=key,
+                            club_name=club,
+                            title=title,
+                            club_desc=club_desc,
+                            reflection_desc=reflection_desc,
+                            model="deepseek-chat",
+                        )
+                        self._log(f"[Reflection] ({idx}/{total}) Reflection generated.")
+                        self._set_preview_reflection(summary, reflection_text)
 
-                    # Fill Reflection content (KindEditor)
-                    fill_kindeditor_body(add_ctx, reflection_text)
+                        # Fill Content Summary
+                        add_ctx.locator("textarea[name='Summary']").fill(summary)
 
-                    # Click Learning Outcomes
-                    self._log(f"[Reflection] Selecting Learning Outcome: {', '.join(selected)}")
-                    click_learning_outcomes(add_ctx, selected)
+                        # Fill Reflection content (KindEditor)
+                        fill_kindeditor_body(add_ctx, reflection_text)
 
-                    # Save
-                    add_ctx.locator("button[lay-filter='add']:has-text('Save')").click()
-                    self._log("[Reflection] ✅ Save clicked.")
+                        # Click Learning Outcomes
+                        self._log(f"[Reflection] ({idx}/{total}) Selecting Learning Outcome: {', '.join(selected)}")
+                        click_learning_outcomes(add_ctx, selected)
 
-                    time.sleep(2)
+                        # Save
+                        add_ctx.locator("button[lay-filter='add']:has-text('Save')").click()
+                        self._log(f"[Reflection] ({idx}/{total}) Save clicked.")
+
+                        try:
+                            page.locator("iframe[src*='/Stu/Cas/AddReflection']").wait_for(state="detached", timeout=12000)
+                        except Exception:
+                            time.sleep(1.2)
+
                     browser.close()
 
-                self._log("[Reflection] ✅ Run finished.")
+                self._log("[Reflection] Run finished.")
                 self.after(0, lambda: self._set_buttons_running(False))
 
             except PWTimeoutError as e:
-                self._log(f"[Reflection] ❌ Timeout: {e}")
+                self._log(f"[Reflection] Timeout: {e}")
                 self.after(0, lambda: self._set_buttons_running(False))
             except Exception as e:
-                self._log(f"[Reflection] ❌ Error: {e}")
+                self._log(f"[Reflection] Error: {e}")
                 self.after(0, lambda: self._set_buttons_running(False))
 
         self.worker = threading.Thread(target=task, daemon=True)
         self.worker.start()
-
-
 if __name__ == "__main__":
     app = V42App()
     app.mainloop()
+
