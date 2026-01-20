@@ -3,8 +3,9 @@ import queue
 import re
 import time
 import html
+import json
 import calendar
-from datetime import date as dt_date
+from datetime import date as dt_date, timedelta
 import requests
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -32,6 +33,13 @@ def parse_date_ymd(s: str):
     except ValueError as exc:
         raise ValueError("Invalid date (check month/day/leap year).") from exc
     return y, mo, d
+
+
+def iter_weekly_dates(start_dt: dt_date, end_dt: dt_date):
+    cur = start_dt
+    while cur <= end_dt:
+        yield cur
+        cur += timedelta(days=7)
 
 
 def pick_context(page, iframe_css: str):
@@ -122,6 +130,21 @@ def word_count(s: str) -> int:
     return len(re.findall(r"\S", s))
 
 
+def parse_json_object(text: str) -> dict:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```[a-zA-Z0-9]*\n", "", cleaned)
+        cleaned = re.sub(r"\n```$", "", cleaned)
+        cleaned = cleaned.strip()
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        m = re.search(r"\{.*\}", cleaned, re.S)
+        if not m:
+            raise ValueError("No JSON object found in response.")
+        return json.loads(m.group(0))
+
+
 # -----------------------------
 # DeepSeek generation
 # -----------------------------
@@ -175,6 +198,85 @@ def generate_activity_record_deepseek(
         messages.append({"role": "user", "content": "Too short. Expand to 120–180 words, keep specific and realistic."})
 
     return last_text
+
+
+def generate_weekly_theme_desc_deepseek(
+    api_key: str,
+    club_name: str,
+    date_ymd: str,
+    club_desc: str,
+    periodic_desc: str,
+    used_themes: list[str],
+    used_descs=None,
+    model: str = "deepseek-chat",
+) -> tuple[str, str]:
+    avoid = "; ".join(used_themes[-8:]) if used_themes else "none"
+    periodic_line = f"- Periodic activity: {periodic_desc}" if periodic_desc else "- Periodic activity: none"
+    user_content = (
+        f"Create ONE unique Activity theme and Activity Description for the club '{club_name}'.\n"
+        f"Club description: {club_desc}\n"
+        f"Date: {date_ymd}\n"
+        f"{periodic_line}\n\n"
+        f"Return a JSON object with keys theme and description only.\n"
+        f"Rules:\n"
+        f"- theme: 4-10 words, English, no date, no quotes.\n"
+        f"- description: English, single paragraph, more than 80 words.\n"
+        f"- Include at least 3 concrete details (what I did, materials/topics, specific examples, or changes).\n"
+        f"- If a periodic activity is provided, keep it consistent but vary the details week to week.\n"
+        f"- Avoid repetition across entries. Do NOT reuse any themes, topics, or examples from: {avoid}.\n"
+        f"- Vary the activity focus across weeks (e.g., discussion, research, source analysis, workshop, debate, planning).\n"
+        f"- No bullet points, no markdown, no labels."
+    )
+
+    messages = [
+        {"role": "system", "content": "Return ONLY a valid JSON object with keys theme and description."},
+        {"role": "user", "content": user_content},
+    ]
+
+    used_norm = {t.strip().lower() for t in used_themes}
+    used_descs_norm = {d.strip().lower() for d in (used_descs or [])}
+    last_theme = ""
+    last_desc = ""
+
+    for _ in range(4):
+        resp = deepseek_chat(api_key, model, messages, temperature=0.6, max_tokens=320)
+        raw = resp["choices"][0]["message"]["content"].strip()
+        try:
+            obj = parse_json_object(raw)
+            theme = str(obj.get("theme", "")).strip()
+            desc = str(obj.get("description", "")).strip()
+        except Exception:
+            messages.append({"role": "assistant", "content": raw})
+            messages.append({"role": "user", "content": "Return only valid JSON with keys theme and description."})
+            continue
+
+        theme = re.sub(r"\s+", " ", theme)
+        desc = re.sub(r"\s+", " ", desc)
+        last_theme, last_desc = theme, desc
+
+        theme_wc = word_count(theme)
+        if not theme or theme_wc < 4 or theme_wc > 10:
+            messages.append({"role": "assistant", "content": raw})
+            messages.append({"role": "user", "content": "Revise: theme must be 4-10 words."})
+            continue
+
+        if theme.strip().lower() in used_norm:
+            messages.append({"role": "assistant", "content": raw})
+            messages.append({"role": "user", "content": "Revise: theme repeats a previous entry. Make it clearly different."})
+            continue
+
+        if word_count(desc) <= 80:
+            messages.append({"role": "assistant", "content": raw})
+            messages.append({"role": "user", "content": "Revise: description must be more than 80 words, one paragraph."})
+            continue
+        if desc.strip().lower() in used_descs_norm:
+            messages.append({"role": "assistant", "content": raw})
+            messages.append({"role": "user", "content": "Revise: description repeats a previous entry. Write new content."})
+            continue
+
+        return theme, desc
+
+    return last_theme, last_desc
 
 
 def generate_reflection_summary_deepseek(
@@ -399,13 +501,14 @@ def click_learning_outcomes(add_ctx, selected: list[str]):
 class DatePicker(tk.Toplevel):
     DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-    def __init__(self, master, initial_date, on_select):
+    def __init__(self, master, initial_date, on_select, allowed_weekday=None):
         super().__init__(master)
         self.title("Select date")
         self.resizable(False, False)
         self.on_select = on_select
         self.cal = calendar.Calendar(firstweekday=calendar.MONDAY)
         self.today = dt_date.today()
+        self.allowed_weekday = allowed_weekday
 
         self.year, self.month, _day = initial_date
 
@@ -424,6 +527,22 @@ class DatePicker(tk.Toplevel):
         self.style.map("CalToday.TButton", background=[("active", "#a6d49f")])
         self.style.configure("CalDimToday.TButton", foreground="gray50", background="#b7e1b5")
         self.style.map("CalDimToday.TButton", background=[("active", "#a6d49f")])
+        self.style.configure("CalValid.TButton", background="#b7e1b5")
+        self.style.map("CalValid.TButton", background=[("active", "#a6d49f")])
+        self.style.configure("CalInvalid.TButton", foreground="#7a1d1d", background="#f3b3b3")
+        self.style.map(
+            "CalInvalid.TButton",
+            background=[("disabled", "#f3b3b3"), ("active", "#ee9c9c")],
+            foreground=[("disabled", "#7a1d1d")],
+        )
+        self.style.configure("CalDimValid.TButton", foreground="gray35", background="#d7ead2")
+        self.style.map("CalDimValid.TButton", background=[("active", "#cfe5ca")])
+        self.style.configure("CalDimInvalid.TButton", foreground="#7a1d1d", background="#f0c6c6")
+        self.style.map(
+            "CalDimInvalid.TButton",
+            background=[("disabled", "#f0c6c6"), ("active", "#e9b4b4")],
+            foreground=[("disabled", "#7a1d1d")],
+        )
 
         nav = ttk.Frame(self, padding=(8, 8, 8, 0))
         nav.pack(fill="x")
@@ -462,33 +581,47 @@ class DatePicker(tk.Toplevel):
                 cell_index = r * 7 + c
                 day_num = cell_index - first_weekday + 1
 
+                in_month = True
                 if day_num < 1:
                     disp_day = days_in_prev + day_num
                     disp_year, disp_month = prev_year, prev_month
                     style = "CalDim.TButton"
+                    in_month = False
                 elif day_num > days_in_month:
                     disp_day = day_num - days_in_month
                     disp_year, disp_month = next_year, next_month
                     style = "CalDim.TButton"
+                    in_month = False
                 else:
                     disp_day = day_num
                     disp_year, disp_month = self.year, self.month
                     style = "TButton"
+                    in_month = True
 
-                is_today = (
-                    disp_year == self.today.year
-                    and disp_month == self.today.month
-                    and disp_day == self.today.day
-                )
-                if is_today and style == "CalDim.TButton":
-                    style = "CalDimToday.TButton"
-                elif is_today:
-                    style = "CalToday.TButton"
+                state = "normal"
+                if self.allowed_weekday is not None:
+                    allowed = dt_date(disp_year, disp_month, disp_day).weekday() == self.allowed_weekday
+                    if in_month:
+                        style = "CalValid.TButton" if allowed else "CalInvalid.TButton"
+                    else:
+                        style = "CalDimValid.TButton" if allowed else "CalDimInvalid.TButton"
+                    state = "normal" if allowed else "disabled"
+                else:
+                    is_today = (
+                        disp_year == self.today.year
+                        and disp_month == self.today.month
+                        and disp_day == self.today.day
+                    )
+                    if is_today and style == "CalDim.TButton":
+                        style = "CalDimToday.TButton"
+                    elif is_today:
+                        style = "CalToday.TButton"
 
                 btn = ttk.Button(
                     self.calendar_frame,
                     text=str(disp_day),
                     style=style,
+                    state=state,
                     command=lambda y=disp_year, m=disp_month, d=disp_day: self._select_date(y, m, d),
                 )
                 btn.grid(row=r + 1, column=c, padx=2, pady=2, sticky="nsew")
@@ -540,12 +673,13 @@ class V42App(tk.Tk):
         "Ethics",
         "New Skills",
     ]
+    WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
     def __init__(self):
         super().__init__()
-        self.title("WFLA CAS Autofill – V4.2.2 (Records + Reflection + DeepSeek)")
-        self.geometry("1080x700")
-        self.minsize(980, 640)
+        self.title("WFLA CAS Autofill - V4.3.0 (Records + Reflection + Weekly Batch)")
+        self.geometry("1400x900")
+        self.minsize(1240, 820)
 
         self.log_q = queue.Queue()
         self.worker = None
@@ -649,7 +783,7 @@ class V42App(tk.Tk):
         self.tabs.add(tab_ref, text="Activity Reflection")
 
         # --- Records tab
-        lf_rec = ttk.Labelframe(tab_rec, text="Record", padding=10)
+        lf_rec = ttk.Labelframe(tab_rec, text="Single Record", padding=10)
         lf_rec.pack(fill="x")
 
         self.var_rec_club = tk.StringVar()
@@ -691,8 +825,89 @@ class V42App(tk.Tk):
         rec_btns.pack(fill="x", pady=(10, 0))
         self.btn_rec_fetch = ttk.Button(rec_btns, text="Fetch clubs", command=self.on_fetch_clubs_records)
         self.btn_rec_fetch.pack(side="left", ipadx=8)
-        self.btn_rec_run = ttk.Button(rec_btns, text="Run record autofill", style="Accent.TButton", command=self.on_run_record)
+        self.btn_rec_run = ttk.Button(rec_btns, text="Run single record", style="Accent.TButton", command=self.on_run_record)
         self.btn_rec_run.pack(side="left", padx=(10, 0), ipadx=8)
+
+        # --- Weekly Batch Records
+        lf_batch = ttk.Labelframe(tab_rec, text="Weekly Batch Records", padding=10)
+        lf_batch.pack(fill="x", pady=(12, 0))
+
+        self.var_batch_club = tk.StringVar()
+        self.var_batch_club_desc = tk.StringVar(value="")
+        self.var_batch_weekday = tk.StringVar(value="")
+        self.var_batch_start = tk.StringVar(value="")
+        self.var_batch_end = tk.StringVar(value="")
+        self.var_batch_periodic = tk.StringVar(value="")
+        self.var_batch_c = tk.StringVar(value="")
+        self.var_batch_a = tk.StringVar(value="")
+        self.var_batch_s = tk.StringVar(value="")
+
+        self.combo_batch_club = self._row(
+            lf_batch, 0, "Club",
+            lambda p: ttk.Combobox(p, textvariable=self.var_batch_club, width=31, state="readonly", values=[])
+        )
+        self._row(
+            lf_batch, 1, "Club description",
+            lambda p: ttk.Entry(p, textvariable=self.var_batch_club_desc, width=34)
+        )
+        self.combo_batch_weekday = self._row(
+            lf_batch, 2, "Weekday",
+            lambda p: ttk.Combobox(p, textvariable=self.var_batch_weekday, width=31, state="readonly", values=self.WEEKDAYS)
+        )
+        self.combo_batch_weekday.bind("<<ComboboxSelected>>", self._on_batch_weekday_selected)
+
+        def build_batch_start_picker(p):
+            f = ttk.Frame(p)
+            self.entry_batch_start = ttk.Entry(f, textvariable=self.var_batch_start, width=24, state="readonly")
+            self.entry_batch_start.pack(side="left", fill="x", expand=True)
+            self.btn_batch_start_pick = ttk.Button(
+                f, text="Pick", state="disabled", command=self._open_batch_start_picker
+            )
+            self.btn_batch_start_pick.pack(side="left", padx=(6, 0))
+            self.entry_batch_start.bind("<Button-1>", lambda _e: self._open_batch_start_picker())
+            self.entry_batch_start.bind("<Return>", lambda _e: self._open_batch_start_picker())
+            return f
+
+        def build_batch_end_picker(p):
+            f = ttk.Frame(p)
+            self.entry_batch_end = ttk.Entry(f, textvariable=self.var_batch_end, width=24, state="readonly")
+            self.entry_batch_end.pack(side="left", fill="x", expand=True)
+            self.btn_batch_end_pick = ttk.Button(
+                f, text="Pick", state="disabled", command=self._open_batch_end_picker
+            )
+            self.btn_batch_end_pick.pack(side="left", padx=(6, 0))
+            self.entry_batch_end.bind("<Button-1>", lambda _e: self._open_batch_end_picker())
+            self.entry_batch_end.bind("<Return>", lambda _e: self._open_batch_end_picker())
+            return f
+
+        self._row(lf_batch, 3, "Start date", build_batch_start_picker)
+        self._row(lf_batch, 4, "End date", build_batch_end_picker)
+        self._row(
+            lf_batch, 5, "Periodic activity (optional)",
+            lambda p: ttk.Entry(p, textvariable=self.var_batch_periodic, width=34)
+        )
+        def build_hours_batch(p):
+            f = ttk.Frame(p)
+            ttk.Label(f, text="C").pack(side="left")
+            ttk.Entry(f, textvariable=self.var_batch_c, width=6).pack(side="left", padx=(4, 14))
+            ttk.Label(f, text="A").pack(side="left")
+            ttk.Entry(f, textvariable=self.var_batch_a, width=6).pack(side="left", padx=(4, 14))
+            ttk.Label(f, text="S").pack(side="left")
+            ttk.Entry(f, textvariable=self.var_batch_s, width=6).pack(side="left", padx=(4, 0))
+            return f
+
+        self._row(lf_batch, 6, "Hours (C/A/S)", build_hours_batch)
+        self._row(
+            lf_batch, 7, "Theme/Description",
+            lambda p: ttk.Label(p, text="Generated automatically by DeepSeek", anchor="w")
+        )
+
+        batch_btns = ttk.Frame(tab_rec)
+        batch_btns.pack(fill="x", pady=(8, 0))
+        self.btn_batch_run = ttk.Button(
+            batch_btns, text="Run weekly batch", style="Accent.TButton", command=self.on_run_record_batch
+        )
+        self.btn_batch_run.pack(side="left", ipadx=8)
 
         # --- Reflection tab
         lf_ref = ttk.Labelframe(tab_ref, text="Reflection", padding=10)
@@ -779,7 +994,7 @@ class V42App(tk.Tk):
         footer.pack(fill="x", pady=(10, 0))
         self.btn_stop = ttk.Button(footer, text="Close browser (manual)", command=self.on_hint_stop)
         self.btn_stop.pack(side="left")
-        ttk.Label(footer, text="V4.2.2 – Records + Reflection (DeepSeek)").pack(side="left", padx=(12, 0))
+        ttk.Label(footer, text="V4.3.0 - Records + Reflection + Weekly Batch (DeepSeek)").pack(side="left", padx=(12, 0))
 
     # ---------- logging / previews ----------
 
@@ -853,6 +1068,46 @@ class V42App(tk.Tk):
                 raise ValueError(f"{name} hours must be a number.")
         return club, (y, mo, d), theme, c, a, s
 
+    def _validate_record_batch(self):
+        club = self.var_batch_club.get().strip()
+        club_desc = self.var_batch_club_desc.get().strip()
+        weekday_label = self.var_batch_weekday.get().strip()
+        start = self.var_batch_start.get().strip()
+        end = self.var_batch_end.get().strip()
+        periodic = self.var_batch_periodic.get().strip()
+        c = self.var_batch_c.get().strip()
+        a = self.var_batch_a.get().strip()
+        s = self.var_batch_s.get().strip()
+
+        if not club:
+            raise ValueError("Please fetch and select a club (Weekly Batch).")
+        if not club_desc:
+            raise ValueError("Club description cannot be empty.")
+        if not weekday_label:
+            raise ValueError("Please select a weekday first.")
+        if not start or not end:
+            raise ValueError("Please select both start and end dates.")
+        for name, val in [("C", c), ("A", a), ("S", s)]:
+            if not re.match(r"^\d+(\.\d+)?$", val):
+                raise ValueError(f"{name} hours must be a number.")
+
+        y1, m1, d1 = parse_date_ymd(start)
+        y2, m2, d2 = parse_date_ymd(end)
+        start_dt = dt_date(y1, m1, d1)
+        end_dt = dt_date(y2, m2, d2)
+        weekday_idx = self.WEEKDAYS.index(weekday_label)
+
+        if start_dt.weekday() != weekday_idx or end_dt.weekday() != weekday_idx:
+            raise ValueError(f"Start and end dates must both be {weekday_label}.")
+        if start_dt > end_dt:
+            raise ValueError("End date must be the same day or after start date.")
+
+        dates = list(iter_weekly_dates(start_dt, end_dt))
+        if not dates:
+            raise ValueError("No dates found for the selected range.")
+
+        return club, club_desc, periodic, dates, c, a, s
+
     def _validate_reflection(self):
         club = self.var_ref_club.get().strip()
         title = self.var_ref_title.get().strip()
@@ -867,7 +1122,7 @@ class V42App(tk.Tk):
 
     def _set_buttons_running(self, running: bool):
         state = "disabled" if running else "normal"
-        for b in [self.btn_rec_fetch, self.btn_rec_run, self.btn_ref_fetch, self.btn_ref_run]:
+        for b in [self.btn_rec_fetch, self.btn_rec_run, self.btn_batch_run, self.btn_ref_fetch, self.btn_ref_run]:
             b.configure(state=state)
 
     def _open_rec_date_picker(self):
@@ -885,6 +1140,62 @@ class V42App(tk.Tk):
 
     def _set_rec_date(self, y: int, mo: int, d: int):
         self.var_rec_date.set(f"{y:04d}/{mo:02d}/{d:02d}")
+
+    def _on_batch_weekday_selected(self, _event=None):
+        self.var_batch_start.set("")
+        self.var_batch_end.set("")
+        self.btn_batch_start_pick.configure(state="normal")
+        self.btn_batch_end_pick.configure(state="normal")
+
+    def _get_batch_weekday_index(self):
+        weekday_label = self.var_batch_weekday.get().strip()
+        if not weekday_label:
+            raise ValueError("Please select a weekday first.")
+        return self.WEEKDAYS.index(weekday_label)
+
+    def _open_batch_start_picker(self):
+        try:
+            weekday_idx = self._get_batch_weekday_index()
+        except Exception as e:
+            messagebox.showerror("Invalid input", str(e))
+            return
+
+        raw = self.var_batch_start.get().strip()
+        initial = None
+        if raw:
+            try:
+                initial = parse_date_ymd(raw)
+            except ValueError:
+                initial = None
+        if not initial:
+            today = dt_date.today()
+            initial = (today.year, today.month, today.day)
+        DatePicker(self, initial, self._set_batch_start, allowed_weekday=weekday_idx)
+
+    def _open_batch_end_picker(self):
+        try:
+            weekday_idx = self._get_batch_weekday_index()
+        except Exception as e:
+            messagebox.showerror("Invalid input", str(e))
+            return
+
+        raw = self.var_batch_end.get().strip()
+        initial = None
+        if raw:
+            try:
+                initial = parse_date_ymd(raw)
+            except ValueError:
+                initial = None
+        if not initial:
+            today = dt_date.today()
+            initial = (today.year, today.month, today.day)
+        DatePicker(self, initial, self._set_batch_end, allowed_weekday=weekday_idx)
+
+    def _set_batch_start(self, y: int, mo: int, d: int):
+        self.var_batch_start.set(f"{y:04d}/{mo:02d}/{d:02d}")
+
+    def _set_batch_end(self, y: int, mo: int, d: int):
+        self.var_batch_end.set(f"{y:04d}/{mo:02d}/{d:02d}")
 
     # ---------- actions ----------
 
@@ -927,8 +1238,12 @@ class V42App(tk.Tk):
 
                 def update_ui():
                     self.combo_rec_club.configure(values=self.clubs_records)
+                    self.combo_batch_club.configure(values=self.clubs_records)
                     if self.clubs_records:
-                        self.var_rec_club.set(self.clubs_records[0])
+                        if not self.var_rec_club.get():
+                            self.var_rec_club.set(self.clubs_records[0])
+                        if not self.var_batch_club.get():
+                            self.var_batch_club.set(self.clubs_records[0])
                     self._set_buttons_running(False)
 
                 self.after(0, update_ui)
@@ -1061,6 +1376,93 @@ class V42App(tk.Tk):
                 self.after(0, lambda: self._set_buttons_running(False))
             except Exception as e:
                 self._log(f"[Records] ❌ Error: {e}")
+                self.after(0, lambda: self._set_buttons_running(False))
+
+        self.worker = threading.Thread(target=task, daemon=True)
+        self.worker.start()
+
+    def on_run_record_batch(self):
+        if self.worker and self.worker.is_alive():
+            return
+        try:
+            user, pw, key = self._validate_account()
+            club, club_desc, periodic, dates, c, a, s = self._validate_record_batch()
+        except Exception as e:
+            messagebox.showerror("Invalid input", str(e))
+            return
+
+        self._set_buttons_running(True)
+        self._log(f"[Batch] Run started: {len(dates)} weekly records.")
+
+        def task():
+            used_themes: list[str] = []
+            used_descs: list[str] = []
+            try:
+                with sync_playwright() as p:
+                    browser = p.chromium.launch(headless=False, slow_mo=60)
+                    page = browser.new_page()
+
+                    login_and_wait_home(page, user, pw)
+                    record_list_ctx = open_records_list_ctx(page)
+
+                    total = len(dates)
+                    for idx, dt_item in enumerate(dates, start=1):
+                        date_ymd = f"{dt_item.year:04d}/{dt_item.month:02d}/{dt_item.day:02d}"
+                        self._log(f"[Batch] ({idx}/{total}) Generating theme + description for {date_ymd}...")
+                        theme, desc = generate_weekly_theme_desc_deepseek(
+                            api_key=key,
+                            club_name=club,
+                            date_ymd=date_ymd,
+                            club_desc=club_desc,
+                            periodic_desc=periodic,
+                            used_themes=used_themes,
+                            used_descs=used_descs,
+                            model="deepseek-chat",
+                        )
+                        if not theme or not desc:
+                            raise RuntimeError(f"DeepSeek returned empty content for {date_ymd}.")
+
+                        used_themes.append(theme)
+                        used_descs.append(desc)
+                        self._set_preview_record(f"{theme}\n\n{desc}")
+                        self._log(f"[Batch] ({idx}/{total}) Filling record for {date_ymd}...")
+
+                        add_ctx = open_add_record_ctx(record_list_ctx, page)
+                        select_club_by_text(add_ctx, club)
+
+                        date_input = add_ctx.locator(
+                            "div.layui-form-item:has(label:has-text('Event date')) input"
+                        )
+                        date_input.click()
+                        cal_scope = add_ctx if add_ctx.locator("#layui-laydate1").count() else page
+                        select_date_layui(cal_scope, dt_item.year, dt_item.month, dt_item.day)
+
+                        add_ctx.locator(
+                            "div.layui-form-item:has(label:has-text('Activity theme')) input"
+                        ).fill(theme)
+
+                        add_ctx.locator("input[name='CDuration']").fill(c)
+                        add_ctx.locator("input[name='ADuration']").fill(a)
+                        add_ctx.locator("input[name='SDuration']").fill(s)
+
+                        add_ctx.locator("textarea[name='Reflection']").fill(desc)
+
+                        add_ctx.locator("button[lay-filter='add']:has-text('Save')").click()
+                        self._log(f"[Batch] ({idx}/{total}) Save clicked.")
+
+                        try:
+                            page.locator("iframe[src*='/Stu/Cas/AddRecord']").wait_for(state="detached", timeout=10000)
+                        except Exception:
+                            time.sleep(1.2)
+
+                    browser.close()
+
+                self._log("[Batch] Run finished.")
+            except PWTimeoutError as e:
+                self._log(f"[Batch] Timeout: {e}")
+            except Exception as e:
+                self._log(f"[Batch] Error: {e}")
+            finally:
                 self.after(0, lambda: self._set_buttons_running(False))
 
         self.worker = threading.Thread(target=task, daemon=True)
