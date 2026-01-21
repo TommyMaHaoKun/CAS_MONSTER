@@ -15,6 +15,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PWTimeoutError
 URL = "http://101.227.232.33:8001/"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_CHAT_ENDPOINT = f"{DEEPSEEK_BASE_URL}/v1/chat/completions"
+CONVERSATION_CLUB = "谈话记录(Conversation)"
 
 
 # -----------------------------
@@ -159,6 +160,9 @@ def generate_activity_record_deepseek(
     s_hours: str,
     model: str = "deepseek-chat",
 ) -> str:
+    is_conversation = club_name.strip() == CONVERSATION_CLUB
+    min_words = 175 if is_conversation else 100
+    word_target = "180每220" if is_conversation else "120每180"
     user_content = (
         f"Write an IB CAS Activity Record for the club '{club_name}'.\n"
         f"Context:\n"
@@ -172,7 +176,7 @@ def generate_activity_record_deepseek(
         f"Content requirements:\n"
         f"- English, realistic high school tone.\n"
         f"- 1–2 coherent paragraphs.\n"
-        f"- 120–180 words (must be >= 100 words).\n"
+        f"- {word_target} words (must be >= {min_words} words).\n"
         f"- The first 80% of the text must be concrete and specific: include at least 3–5 details "
         f"(what exactly I did, what material/topic I covered, what example I used, what question I handled, what I changed/improved).\n"
         f"- If this is a history-related activity (e.g., speech/lecture/presentation), include at least TWO specific pieces of history knowledge "
@@ -192,10 +196,13 @@ def generate_activity_record_deepseek(
         resp = deepseek_chat(api_key, model, messages, temperature=0.55, max_tokens=360)
         text = resp["choices"][0]["message"]["content"].strip()
         last_text = text
-        if word_count(text) >= 100:
+        if word_count(text) >= min_words:
             return text
         messages.append({"role": "assistant", "content": text})
-        messages.append({"role": "user", "content": "Too short. Expand to 120–180 words, keep specific and realistic."})
+        messages.append({
+            "role": "user",
+            "content": f"Too short. Expand to {word_target} words, keep specific and realistic."
+        })
 
     return last_text
 
@@ -413,7 +420,8 @@ def list_clubs_in_add_dialog(add_ctx):
 
     options = add_ctx.locator("dd[lay-value]").filter(has_not=add_ctx.locator(".layui-select-tips"))
     options.first.wait_for(timeout=10000)
-    return [t.strip() for t in options.all_inner_texts() if t.strip()]
+    clubs = [t.strip() for t in options.all_inner_texts() if t.strip()]
+    return [c for c in clubs if c.lower() != "please select"]
 
 
 def select_club_by_text(add_ctx, club_name: str):
@@ -693,7 +701,7 @@ class V42App(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("WFLA CAS Autofill - V4.3.1 (Records + Reflection + Weekly Batch)")
+        self.title("WFLA CAS Autofill - V5.0.0 (Records + Reflection + Weekly Batch)")
         self.geometry("1400x900")
         self.minsize(1240, 820)
 
@@ -748,6 +756,7 @@ class V42App(tk.Tk):
         style.configure("TLabel", font=("Segoe UI", 10))
         style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"))
         style.configure("TButton", font=("Segoe UI", 10))
+        style.configure("Fetch.TButton", font=("Segoe UI", 9, "bold"), padding=(6, 2))
         style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"))
         style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"))
         style.configure("TNotebook.Tab", font=("Segoe UI", 10, "bold"))
@@ -771,10 +780,11 @@ class V42App(tk.Tk):
         top.pack(fill="both", expand=True)
 
         left = ttk.Frame(top)
-        left.pack(side="left", fill="both", expand=False)
+        left.pack(side="left", fill="both", expand=True)
 
-        right = ttk.Frame(top)
-        right.pack(side="right", fill="both", expand=True, padx=(14, 0))
+        right = ttk.Frame(top, width=420)
+        right.pack(side="right", fill="y", expand=False, padx=(14, 0))
+        right.pack_propagate(False)
 
         # --- Left: Account + Tabs
         ttk.Label(left, text="Input", style="Header.TLabel").pack(anchor="w", pady=(0, 8))
@@ -789,13 +799,19 @@ class V42App(tk.Tk):
         self._row(lf_acc, 0, "Username", lambda p: ttk.Entry(p, textvariable=self.var_user, width=34))
         self._row(lf_acc, 1, "Password", lambda p: ttk.Entry(p, textvariable=self.var_pass, show="•", width=34))
         self._row(lf_acc, 2, "DeepSeek API Key", lambda p: ttk.Entry(p, textvariable=self.var_dskey, show="•", width=34))
+        self.btn_fetch_clubs = self._row(
+            lf_acc, 3, "",
+            lambda p: ttk.Button(p, text="Fetch clubs", style="Fetch.TButton", width=12, command=self.on_fetch_clubs_records)
+        )
 
         self.tabs = ttk.Notebook(left)
-        self.tabs.pack(fill="x", expand=False)
+        self.tabs.pack(fill="both", expand=True)
 
         tab_rec = ttk.Frame(self.tabs, padding=10)
+        tab_batch = ttk.Frame(self.tabs, padding=10)
         tab_ref = ttk.Frame(self.tabs, padding=10)
         self.tabs.add(tab_rec, text="Activity Records")
+        self.tabs.add(tab_batch, text="Weekly Batch Records")
         self.tabs.add(tab_ref, text="Activity Reflection")
 
         # --- Records tab
@@ -839,14 +855,12 @@ class V42App(tk.Tk):
 
         rec_btns = ttk.Frame(tab_rec)
         rec_btns.pack(fill="x", pady=(10, 0))
-        self.btn_rec_fetch = ttk.Button(rec_btns, text="Fetch clubs", command=self.on_fetch_clubs_records)
-        self.btn_rec_fetch.pack(side="left", ipadx=8)
         self.btn_rec_run = ttk.Button(rec_btns, text="Run single record", style="Accent.TButton", command=self.on_run_record)
-        self.btn_rec_run.pack(side="left", padx=(10, 0), ipadx=8)
+        self.btn_rec_run.pack(side="left", ipadx=8)
 
         # --- Weekly Batch Records
-        lf_batch = ttk.Labelframe(tab_rec, text="Weekly Batch Records", padding=10)
-        lf_batch.pack(fill="x", pady=(12, 0))
+        lf_batch = ttk.Labelframe(tab_batch, text="Weekly Batch Records", padding=10)
+        lf_batch.pack(fill="x")
 
         self.var_batch_club = tk.StringVar()
         self.var_batch_club_desc = tk.StringVar(value="")
@@ -918,7 +932,7 @@ class V42App(tk.Tk):
             lambda p: ttk.Label(p, text="Generated automatically by DeepSeek", anchor="w")
         )
 
-        batch_btns = ttk.Frame(tab_rec)
+        batch_btns = ttk.Frame(tab_batch)
         batch_btns.pack(fill="x", pady=(8, 0))
         self.btn_batch_run = ttk.Button(
             batch_btns, text="Run weekly batch", style="Accent.TButton", command=self.on_run_record_batch
@@ -987,10 +1001,8 @@ class V42App(tk.Tk):
 
         ref_btns = ttk.Frame(tab_ref)
         ref_btns.pack(fill="x", pady=(10, 0))
-        self.btn_ref_fetch = ttk.Button(ref_btns, text="Fetch clubs", command=self.on_fetch_clubs_reflection)
-        self.btn_ref_fetch.pack(side="left", ipadx=8)
         self.btn_ref_run = ttk.Button(ref_btns, text="Run reflection autofill", style="Accent.TButton", command=self.on_run_reflection)
-        self.btn_ref_run.pack(side="left", padx=(10, 0), ipadx=8)
+        self.btn_ref_run.pack(side="left", ipadx=8)
 
         # --- Right: Previews + logs
         ttk.Label(right, text="Preview", style="Header.TLabel").pack(anchor="w")
@@ -1027,7 +1039,7 @@ class V42App(tk.Tk):
         footer.pack(fill="x", pady=(10, 0))
         self.btn_stop = ttk.Button(footer, text="Close browser (manual)", command=self.on_hint_stop)
         self.btn_stop.pack(side="left")
-        ttk.Label(footer, text="V4.3.1 - Records + Reflection + Weekly Batch (DeepSeek)").pack(side="left", padx=(12, 0))
+        ttk.Label(footer, text="V5.0.0 - Records + Reflection + Weekly Batch (DeepSeek)").pack(side="left", padx=(12, 0))
 
     # ---------- logging / previews ----------
 
@@ -1172,7 +1184,7 @@ class V42App(tk.Tk):
 
     def _set_buttons_running(self, running: bool):
         state = "disabled" if running else "normal"
-        for b in [self.btn_rec_fetch, self.btn_rec_run, self.btn_batch_run, self.btn_ref_fetch, self.btn_ref_run]:
+        for b in [self.btn_fetch_clubs, self.btn_rec_run, self.btn_batch_run, self.btn_ref_run]:
             b.configure(state=state)
 
     def _open_rec_date_picker(self):
@@ -1266,7 +1278,7 @@ class V42App(tk.Tk):
             return
 
         self._set_buttons_running(True)
-        self._log("[Records] Fetch clubs: logging in and opening Add Record...")
+        self._log("[Clubs] Fetch clubs: logging in and opening Add Record...")
 
         def task():
             try:
@@ -1283,72 +1295,39 @@ class V42App(tk.Tk):
                         raise RuntimeError("No clubs found in dropdown (Records).")
 
                     self.clubs_records = clubs
-                    self._log(f"[Records] Fetched {len(clubs)} clubs.")
+                    self.clubs_reflection = list(clubs)
+                    if CONVERSATION_CLUB not in self.clubs_reflection:
+                        self.clubs_reflection.append(CONVERSATION_CLUB)
+                    self._log(
+                        f"[Clubs] Fetched {len(self.clubs_records)} clubs for records, "
+                        f"{len(self.clubs_reflection)} for reflection."
+                    )
                     browser.close()
 
                 def update_ui():
                     self.combo_rec_club.configure(values=self.clubs_records)
                     self.combo_batch_club.configure(values=self.clubs_records)
+                    self.combo_ref_club.configure(values=self.clubs_reflection)
                     if self.clubs_records:
                         if not self.var_rec_club.get():
                             self.var_rec_club.set(self.clubs_records[0])
                         if not self.var_batch_club.get():
                             self.var_batch_club.set(self.clubs_records[0])
-                    self._set_buttons_running(False)
-
-                self.after(0, update_ui)
-
-            except Exception as e:
-                self._log(f"[Records] ❌ Fetch clubs failed: {e}")
-                self.after(0, lambda: self._set_buttons_running(False))
-
-        self.worker = threading.Thread(target=task, daemon=True)
-        self.worker.start()
-
-    def on_fetch_clubs_reflection(self):
-        if self.worker and self.worker.is_alive():
-            return
-        try:
-            user, pw, _key = self._validate_account()
-        except Exception as e:
-            messagebox.showerror("Invalid input", str(e))
-            return
-
-        self._set_buttons_running(True)
-        self._log("[Reflection] Fetch clubs: logging in and opening Add Reflection...")
-
-        def task():
-            try:
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=False, slow_mo=60)
-                    page = browser.new_page()
-
-                    login_and_wait_home(page, user, pw)
-                    refl_list_ctx = open_reflection_list_ctx(page)
-                    add_ctx = open_add_reflection_ctx(refl_list_ctx, page)
-
-                    clubs = list_clubs_in_add_dialog(add_ctx)
-                    if not clubs:
-                        raise RuntimeError("No clubs found in dropdown (Reflection).")
-
-                    self.clubs_reflection = clubs
-                    self._log(f"[Reflection] Fetched {len(clubs)} clubs.")
-                    browser.close()
-
-                def update_ui():
-                    self.combo_ref_club.configure(values=self.clubs_reflection)
-                    if self.clubs_reflection:
+                    if self.clubs_reflection and not self.var_ref_club.get():
                         self.var_ref_club.set(self.clubs_reflection[0])
                     self._set_buttons_running(False)
 
                 self.after(0, update_ui)
 
             except Exception as e:
-                self._log(f"[Reflection] ❌ Fetch clubs failed: {e}")
+                self._log(f"[Clubs] ❌ Fetch clubs failed: {e}")
                 self.after(0, lambda: self._set_buttons_running(False))
 
         self.worker = threading.Thread(target=task, daemon=True)
         self.worker.start()
+
+    def on_fetch_clubs_reflection(self):
+        self.on_fetch_clubs_records()
 
     def on_run_record(self):
         if self.worker and self.worker.is_alive():
