@@ -16,6 +16,18 @@ URL = "http://101.227.232.33:8001/"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEEPSEEK_CHAT_ENDPOINT = f"{DEEPSEEK_BASE_URL}/v1/chat/completions"
 CONVERSATION_CLUB = "谈话记录(Conversation)"
+UI_COLORS = {
+    "bg": "#F5F7FB",
+    "surface": "#FFFFFF",
+    "border": "#D7DCE5",
+    "text": "#111827",
+    "muted": "#6B7280",
+    "accent": "#1A73E8",
+    "accent_hover": "#1664C0",
+    "accent_soft": "#E8F0FE",
+    "danger": "#B3261E",
+    "danger_soft": "#FCE8E6",
+}
 
 
 # -----------------------------
@@ -529,6 +541,7 @@ class DatePicker(tk.Toplevel):
         super().__init__(master)
         self.title("Select date")
         self.resizable(False, False)
+        self.configure(bg=UI_COLORS["bg"])
         self.on_select = on_select
         self.cal = calendar.Calendar(firstweekday=calendar.MONDAY)
         self.today = dt_date.today()
@@ -545,46 +558,83 @@ class DatePicker(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 
     def _build_ui(self):
+        colors = UI_COLORS
         self.style = ttk.Style(self)
-        self.style.configure("CalDim.TButton", foreground="gray50")
-        self.style.configure("CalToday.TButton", background="#b7e1b5")
-        self.style.map("CalToday.TButton", background=[("active", "#a6d49f")])
-        self.style.configure("CalDimToday.TButton", foreground="gray50", background="#b7e1b5")
-        self.style.map("CalDimToday.TButton", background=[("active", "#a6d49f")])
-        self.style.configure("CalValid.TButton", background="#b7e1b5")
-        self.style.map("CalValid.TButton", background=[("active", "#a6d49f")])
-        self.style.configure("CalInvalid.TButton", foreground="#7a1d1d", background="#f3b3b3")
+        self.style.configure("Cal.TFrame", background=colors["bg"])
+        self.style.configure("CalHeader.TLabel", background=colors["bg"], foreground=colors["muted"])
+        self.style.configure(
+            "CalMonth.TLabel",
+            background=colors["bg"],
+            foreground=colors["text"],
+            font=("Segoe UI Semibold", 10),
+        )
+        self.style.configure("CalNav.TButton", padding=(6, 2))
+        self.style.configure("CalDim.TButton", foreground=colors["muted"], background=colors["surface"])
+        self.style.map("CalDim.TButton", background=[("active", "#EEF2F7")])
+        self.style.configure("CalToday.TButton", background=colors["accent_soft"])
+        self.style.map("CalToday.TButton", background=[("active", "#D2E3FC")])
+        self.style.configure("CalDimToday.TButton", foreground=colors["muted"], background=colors["accent_soft"])
+        self.style.map("CalDimToday.TButton", background=[("active", "#D2E3FC")])
+        self.style.configure(
+            "CalValid.TButton",
+            foreground=colors["accent"],
+            background=colors["accent_soft"],
+        )
+        self.style.map(
+            "CalValid.TButton",
+            background=[("active", "#D2E3FC")],
+            foreground=[("active", colors["accent"])],
+        )
+        self.style.configure(
+            "CalInvalid.TButton",
+            foreground=colors["danger"],
+            background=colors["danger_soft"],
+        )
         self.style.map(
             "CalInvalid.TButton",
-            background=[("disabled", "#f3b3b3"), ("active", "#ee9c9c")],
-            foreground=[("disabled", "#7a1d1d")],
+            background=[("disabled", colors["danger_soft"]), ("active", "#FAD2CF")],
+            foreground=[("disabled", colors["danger"])],
         )
-        self.style.configure("CalDimValid.TButton", foreground="gray35", background="#d7ead2")
-        self.style.map("CalDimValid.TButton", background=[("active", "#cfe5ca")])
-        self.style.configure("CalDimInvalid.TButton", foreground="#7a1d1d", background="#f0c6c6")
+        self.style.configure(
+            "CalDimValid.TButton",
+            foreground=colors["muted"],
+            background="#F3F6FD",
+        )
+        self.style.map("CalDimValid.TButton", background=[("active", "#E6EEFB")])
+        self.style.configure(
+            "CalDimInvalid.TButton",
+            foreground=colors["danger"],
+            background="#FBEAEA",
+        )
         self.style.map(
             "CalDimInvalid.TButton",
-            background=[("disabled", "#f0c6c6"), ("active", "#e9b4b4")],
-            foreground=[("disabled", "#7a1d1d")],
+            background=[("disabled", "#FBEAEA"), ("active", "#F7D9D7")],
+            foreground=[("disabled", colors["danger"])],
         )
 
-        nav = ttk.Frame(self, padding=(8, 8, 8, 0))
+        nav = ttk.Frame(self, padding=(8, 8, 8, 0), style="Cal.TFrame")
         nav.pack(fill="x")
 
-        ttk.Button(nav, text="<<", width=3, command=self._prev_year).pack(side="left")
-        ttk.Button(nav, text="<", width=3, command=self._prev_month).pack(side="left", padx=(2, 6))
-        self.lbl_month = ttk.Label(nav, text="", width=16, anchor="center")
+        ttk.Button(nav, text="<<", width=3, style="CalNav.TButton", command=self._prev_year).pack(side="left")
+        ttk.Button(nav, text="<", width=3, style="CalNav.TButton", command=self._prev_month).pack(
+            side="left", padx=(2, 6)
+        )
+        self.lbl_month = ttk.Label(nav, text="", width=16, anchor="center", style="CalMonth.TLabel")
         self.lbl_month.pack(side="left", expand=True)
-        ttk.Button(nav, text=">", width=3, command=self._next_month).pack(side="left", padx=(6, 2))
-        ttk.Button(nav, text=">>", width=3, command=self._next_year).pack(side="left")
-        ttk.Button(nav, text="Back to today", command=self._back_to_today).pack(side="left", padx=(8, 0))
+        ttk.Button(nav, text=">", width=3, style="CalNav.TButton", command=self._next_month).pack(
+            side="left", padx=(6, 2)
+        )
+        ttk.Button(nav, text=">>", width=3, style="CalNav.TButton", command=self._next_year).pack(side="left")
+        ttk.Button(nav, text="Back to today", style="CalNav.TButton", command=self._back_to_today).pack(
+            side="left", padx=(8, 0)
+        )
 
-        self.calendar_frame = ttk.Frame(self, padding=(8, 4, 8, 8))
+        self.calendar_frame = ttk.Frame(self, padding=(8, 4, 8, 8), style="Cal.TFrame")
         self.calendar_frame.pack(fill="both", expand=True)
         for c in range(7):
             self.calendar_frame.columnconfigure(c, uniform="cal", weight=1, minsize=34)
         for i, name in enumerate(self.DAY_LABELS):
-            ttk.Label(self.calendar_frame, text=name, anchor="center").grid(
+            ttk.Label(self.calendar_frame, text=name, anchor="center", style="CalHeader.TLabel").grid(
                 row=0, column=i, padx=2, pady=2, sticky="nsew"
             )
         self._day_widgets = []
@@ -717,52 +767,167 @@ class V42App(tk.Tk):
 
     # ---------- UI ----------
     def _make_checkbox_images(self):
-        """Create custom checkbox images: empty box and checked box (√)."""
+        """Create custom checkbox images: empty box and checked box."""
         size = 14
         off = tk.PhotoImage(width=size, height=size)
         on = tk.PhotoImage(width=size, height=size)
+        colors = self.colors
+        bg = colors["surface"]
+        border = colors["border"]
+        accent = colors["accent"]
 
         # background
         for img in (off, on):
-            img.put("white", to=(0, 0, size, size))
+            img.put(bg, to=(0, 0, size, size))
 
         # border
         for x in range(size):
-            off.put("black", (x, 0)); off.put("black", (x, size - 1))
-            on.put("black", (x, 0));  on.put("black", (x, size - 1))
+            off.put(border, (x, 0)); off.put(border, (x, size - 1))
+            on.put(border, (x, 0));  on.put(border, (x, size - 1))
         for y in range(size):
-            off.put("black", (0, y)); off.put("black", (size - 1, y))
-            on.put("black", (0, y));  on.put("black", (size - 1, y))
+            off.put(border, (0, y)); off.put(border, (size - 1, y))
+            on.put(border, (0, y));  on.put(border, (size - 1, y))
 
-        # draw a √ on "on" image (simple check mark)
+        # draw a check mark on "on" image
         # down stroke
         for i in range(4):
             x = 3 + i
             y = 7 + i
-            on.put("black", (x, y))
-            on.put("black", (x, y + 1))  # thickness
+            on.put(accent, (x, y))
+            on.put(accent, (x, y + 1))  # thickness
         # up stroke
         for i in range(6):
             x = 6 + i
             y = 10 - i
-            on.put("black", (x, y))
-            on.put("black", (x, y + 1))  # thickness
+            on.put(accent, (x, y))
+            on.put(accent, (x, y + 1))  # thickness
 
         return off, on
 
     def _build_style(self):
+        colors = UI_COLORS
+        self.colors = colors
         style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("TLabel", font=("Segoe UI", 10))
-        style.configure("Header.TLabel", font=("Segoe UI", 12, "bold"))
-        style.configure("TButton", font=("Segoe UI", 10))
-        style.configure("Fetch.TButton", font=("Segoe UI", 9, "bold"), padding=(6, 2))
-        style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"))
-        style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"))
-        style.configure("TNotebook.Tab", font=("Segoe UI", 10, "bold"))
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        self.configure(bg=colors["bg"])
+
+        base_font = ("Segoe UI", 10)
+        header_font = ("Segoe UI Semibold", 12)
+        label_font = ("Segoe UI Semibold", 10)
+
+        style.configure(".", font=base_font, background=colors["bg"], foreground=colors["text"])
+        style.configure("App.TFrame", background=colors["bg"])
+        style.configure("Surface.TFrame", background=colors["surface"])
+        style.configure("Card.TFrame", background=colors["surface"], relief="solid", borderwidth=1)
+
+        style.configure("TLabel", background=colors["surface"], foreground=colors["text"])
+        style.configure("Muted.TLabel", background=colors["surface"], foreground=colors["muted"])
+        style.configure("Header.TLabel", font=header_font, background=colors["bg"], foreground=colors["text"])
+        style.configure("PanelHeader.TLabel", font=header_font, background=colors["surface"], foreground=colors["text"])
+        style.configure("Footer.TLabel", background=colors["bg"], foreground=colors["muted"])
+
+        style.configure(
+            "TButton",
+            font=base_font,
+            padding=(12, 6),
+            background=colors["surface"],
+            foreground=colors["text"],
+        )
+        style.map(
+            "TButton",
+            background=[("active", "#EEF2F7")],
+            foreground=[("disabled", colors["muted"])],
+        )
+        style.configure(
+            "Fetch.TButton",
+            font=("Segoe UI Semibold", 10),
+            padding=(10, 5),
+            background=colors["accent_soft"],
+            foreground=colors["accent"],
+        )
+        style.map(
+            "Fetch.TButton",
+            background=[("active", "#D2E3FC")],
+            foreground=[("disabled", colors["muted"])],
+        )
+        style.configure(
+            "Accent.TButton",
+            font=("Segoe UI Semibold", 10),
+            padding=(12, 6),
+            background=colors["accent"],
+            foreground="white",
+        )
+        style.map(
+            "Accent.TButton",
+            background=[("active", colors["accent_hover"]), ("disabled", "#AFC8F4")],
+            foreground=[("disabled", "white")],
+        )
+
+        style.configure(
+            "Card.TLabelframe",
+            background=colors["surface"],
+            borderwidth=1,
+            relief="solid",
+        )
+        style.configure(
+            "Card.TLabelframe.Label",
+            font=label_font,
+            background=colors["surface"],
+            foreground=colors["text"],
+        )
+
+        style.configure(
+            "TNotebook",
+            background=colors["bg"],
+            borderwidth=0,
+        )
+        style.configure(
+            "TNotebook.Tab",
+            font=label_font,
+            padding=(12, 8),
+            background="#E8ECF2",
+            foreground=colors["muted"],
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", colors["surface"])],
+            foreground=[("selected", colors["text"])],
+        )
+
+        style.configure(
+            "TEntry",
+            padding=6,
+            foreground=colors["text"],
+            fieldbackground=colors["surface"],
+            background=colors["surface"],
+        )
+        style.map(
+            "TEntry",
+            bordercolor=[("focus", colors["accent"])],
+            lightcolor=[("focus", colors["accent"])],
+            darkcolor=[("focus", colors["accent"])],
+        )
+        style.configure(
+            "TCombobox",
+            padding=6,
+            foreground=colors["text"],
+            fieldbackground=colors["surface"],
+            background=colors["surface"],
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", colors["surface"])],
+            bordercolor=[("focus", colors["accent"])],
+            lightcolor=[("focus", colors["accent"])],
+            darkcolor=[("focus", colors["accent"])],
+        )
 
     def _row(self, parent, r, label, widget_builder):
-        row = ttk.Frame(parent)
+        row = ttk.Frame(parent, style="Surface.TFrame")
         row.grid(row=r, column=0, sticky="ew", pady=4)
         parent.columnconfigure(0, weight=1)
 
@@ -773,23 +938,35 @@ class V42App(tk.Tk):
         return widget
 
     def _build_ui(self):
-        root = ttk.Frame(self, padding=14)
+        root = ttk.Frame(self, padding=18, style="App.TFrame")
         root.pack(fill="both", expand=True)
 
-        top = ttk.Frame(root)
+        top = ttk.Frame(root, style="App.TFrame")
         top.pack(fill="both", expand=True)
 
-        left = ttk.Frame(top)
+        left = ttk.Frame(top, style="App.TFrame")
         left.pack(side="left", fill="both", expand=True)
 
-        right = ttk.Frame(top, width=420)
+        right = ttk.Frame(top, width=420, style="Surface.TFrame", padding=12, relief="solid", borderwidth=1)
         right.pack(side="right", fill="y", expand=False, padx=(14, 0))
         right.pack_propagate(False)
+
+        text_style = {
+            "background": self.colors["surface"],
+            "foreground": self.colors["text"],
+            "insertbackground": self.colors["text"],
+            "selectbackground": self.colors["accent_soft"],
+            "relief": "solid",
+            "borderwidth": 1,
+            "highlightthickness": 1,
+            "highlightbackground": self.colors["border"],
+            "highlightcolor": self.colors["accent"],
+        }
 
         # --- Left: Account + Tabs
         ttk.Label(left, text="Input", style="Header.TLabel").pack(anchor="w", pady=(0, 8))
 
-        lf_acc = ttk.Labelframe(left, text="Account", padding=10)
+        lf_acc = ttk.Labelframe(left, text="Account", padding=10, style="Card.TLabelframe")
         lf_acc.pack(fill="x", pady=(0, 10))
 
         self.var_user = tk.StringVar()
@@ -807,15 +984,15 @@ class V42App(tk.Tk):
         self.tabs = ttk.Notebook(left)
         self.tabs.pack(fill="both", expand=True)
 
-        tab_rec = ttk.Frame(self.tabs, padding=10)
-        tab_batch = ttk.Frame(self.tabs, padding=10)
-        tab_ref = ttk.Frame(self.tabs, padding=10)
+        tab_rec = ttk.Frame(self.tabs, padding=12, style="Surface.TFrame")
+        tab_batch = ttk.Frame(self.tabs, padding=12, style="Surface.TFrame")
+        tab_ref = ttk.Frame(self.tabs, padding=12, style="Surface.TFrame")
         self.tabs.add(tab_rec, text="Activity Records")
         self.tabs.add(tab_batch, text="Weekly Batch Records")
         self.tabs.add(tab_ref, text="Activity Reflection")
 
         # --- Records tab
-        lf_rec = ttk.Labelframe(tab_rec, text="Single Record", padding=10)
+        lf_rec = ttk.Labelframe(tab_rec, text="Single Record", padding=10, style="Card.TLabelframe")
         lf_rec.pack(fill="x")
 
         self.var_rec_club = tk.StringVar()
@@ -830,7 +1007,7 @@ class V42App(tk.Tk):
             lambda p: ttk.Combobox(p, textvariable=self.var_rec_club, width=31, state="readonly", values=[])
         )
         def build_date_picker(p):
-            f = ttk.Frame(p)
+            f = ttk.Frame(p, style="Surface.TFrame")
             self.entry_rec_date = ttk.Entry(f, textvariable=self.var_rec_date, width=24, state="readonly")
             self.entry_rec_date.pack(side="left", fill="x", expand=True)
             ttk.Button(f, text="Pick", command=self._open_rec_date_picker).pack(side="left", padx=(6, 0))
@@ -842,7 +1019,7 @@ class V42App(tk.Tk):
         self._row(lf_rec, 2, "Activity theme", lambda p: ttk.Entry(p, textvariable=self.var_rec_theme, width=34))
 
         def build_hours_rec(p):
-            f = ttk.Frame(p)
+            f = ttk.Frame(p, style="Surface.TFrame")
             ttk.Label(f, text="C").pack(side="left")
             ttk.Entry(f, textvariable=self.var_rec_c, width=6).pack(side="left", padx=(4, 14))
             ttk.Label(f, text="A").pack(side="left")
@@ -853,13 +1030,13 @@ class V42App(tk.Tk):
 
         self._row(lf_rec, 3, "Hours (C/A/S)", build_hours_rec)
 
-        rec_btns = ttk.Frame(tab_rec)
+        rec_btns = ttk.Frame(tab_rec, style="Surface.TFrame")
         rec_btns.pack(fill="x", pady=(10, 0))
         self.btn_rec_run = ttk.Button(rec_btns, text="Run single record", style="Accent.TButton", command=self.on_run_record)
         self.btn_rec_run.pack(side="left", ipadx=8)
 
         # --- Weekly Batch Records
-        lf_batch = ttk.Labelframe(tab_batch, text="Weekly Batch Records", padding=10)
+        lf_batch = ttk.Labelframe(tab_batch, text="Weekly Batch Records", padding=10, style="Card.TLabelframe")
         lf_batch.pack(fill="x")
 
         self.var_batch_club = tk.StringVar()
@@ -887,7 +1064,7 @@ class V42App(tk.Tk):
         self.combo_batch_weekday.bind("<<ComboboxSelected>>", self._on_batch_weekday_selected)
 
         def build_batch_start_picker(p):
-            f = ttk.Frame(p)
+            f = ttk.Frame(p, style="Surface.TFrame")
             self.entry_batch_start = ttk.Entry(f, textvariable=self.var_batch_start, width=24, state="readonly")
             self.entry_batch_start.pack(side="left", fill="x", expand=True)
             self.btn_batch_start_pick = ttk.Button(
@@ -899,7 +1076,7 @@ class V42App(tk.Tk):
             return f
 
         def build_batch_end_picker(p):
-            f = ttk.Frame(p)
+            f = ttk.Frame(p, style="Surface.TFrame")
             self.entry_batch_end = ttk.Entry(f, textvariable=self.var_batch_end, width=24, state="readonly")
             self.entry_batch_end.pack(side="left", fill="x", expand=True)
             self.btn_batch_end_pick = ttk.Button(
@@ -917,7 +1094,7 @@ class V42App(tk.Tk):
             lambda p: ttk.Entry(p, textvariable=self.var_batch_periodic, width=34)
         )
         def build_hours_batch(p):
-            f = ttk.Frame(p)
+            f = ttk.Frame(p, style="Surface.TFrame")
             ttk.Label(f, text="C").pack(side="left")
             ttk.Entry(f, textvariable=self.var_batch_c, width=6).pack(side="left", padx=(4, 14))
             ttk.Label(f, text="A").pack(side="left")
@@ -932,7 +1109,7 @@ class V42App(tk.Tk):
             lambda p: ttk.Label(p, text="Generated automatically by DeepSeek", anchor="w")
         )
 
-        batch_btns = ttk.Frame(tab_batch)
+        batch_btns = ttk.Frame(tab_batch, style="Surface.TFrame")
         batch_btns.pack(fill="x", pady=(8, 0))
         self.btn_batch_run = ttk.Button(
             batch_btns, text="Run weekly batch", style="Accent.TButton", command=self.on_run_record_batch
@@ -940,7 +1117,7 @@ class V42App(tk.Tk):
         self.btn_batch_run.pack(side="left", ipadx=8)
 
         # --- Reflection tab
-        lf_ref = ttk.Labelframe(tab_ref, text="Reflection", padding=10)
+        lf_ref = ttk.Labelframe(tab_ref, text="Reflection", padding=10, style="Card.TLabelframe")
         lf_ref.pack(fill="x")
 
         self.var_ref_club = tk.StringVar()
@@ -955,30 +1132,32 @@ class V42App(tk.Tk):
         self._row(lf_ref, 2, "Club description", lambda p: ttk.Entry(p, textvariable=self.var_ref_club_desc, width=34))
 
         ttk.Label(lf_ref, text="Titles (one per line)", width=20).grid(row=4, column=0, sticky="w", pady=4)
-        titles_frame = ttk.Frame(lf_ref)
+        titles_frame = ttk.Frame(lf_ref, style="Surface.TFrame")
         titles_frame.grid(row=4, column=1, sticky="ew", pady=4)
         lf_ref.columnconfigure(1, weight=1)
         self.txt_ref_titles = tk.Text(titles_frame, height=4, wrap="word")
         self.txt_ref_titles.pack(fill="both", expand=True)
+        self.txt_ref_titles.configure(**text_style)
 
         ttk.Label(lf_ref, text="Reflection descriptions\n(optional, one per line)", width=20).grid(
             row=5, column=0, sticky="w", pady=4
         )
-        desc_frame = ttk.Frame(lf_ref)
+        desc_frame = ttk.Frame(lf_ref, style="Surface.TFrame")
         desc_frame.grid(row=5, column=1, sticky="ew", pady=4)
         self.txt_ref_desc = tk.Text(desc_frame, height=4, wrap="word")
         self.txt_ref_desc.pack(fill="both", expand=True)
+        self.txt_ref_desc.configure(**text_style)
 
         # Learning outcomes selector
-        outcomes_box = ttk.Labelframe(tab_ref, text="Learning Outcome", padding=10)
+        outcomes_box = ttk.Labelframe(tab_ref, text="Learning Outcome", padding=10, style="Card.TLabelframe")
         
         outcomes_box.pack(fill="x", pady=(10, 0))
 
         self.outcome_vars = {name: tk.BooleanVar(value=False) for name in self.OUTCOMES}
 
-        grid = ttk.Frame(outcomes_box)
+        grid = ttk.Frame(outcomes_box, style="Surface.TFrame")
         grid.pack(fill="x")
-        # custom checkbox icons (force √ instead of ☒)
+        # custom checkbox icons (avoid missing-glyph boxes on some systems)
         self.cb_img_off, self.cb_img_on = self._make_checkbox_images()
 
         # 2 rows x 4 columns
@@ -991,55 +1170,70 @@ class V42App(tk.Tk):
                 variable=self.outcome_vars[name],
                 image=self.cb_img_off,
                 selectimage=self.cb_img_on,
-                indicatoron=0,          # remove default ☒ indicator
+                indicatoron=0,          # remove default indicator
                 compound="left",        # image on the left, text on the right
                 padx=6,
-                anchor="w"
+                anchor="w",
+                background=self.colors["surface"],
+                activebackground=self.colors["surface"],
+                foreground=self.colors["text"],
+                selectcolor=self.colors["surface"],
+                highlightthickness=0,
+                bd=0,
+                font=("Segoe UI", 10),
             )
             cb.grid(row=r, column=c, sticky="w", padx=8, pady=4)
 
 
-        ref_btns = ttk.Frame(tab_ref)
+        ref_btns = ttk.Frame(tab_ref, style="Surface.TFrame")
         ref_btns.pack(fill="x", pady=(10, 0))
         self.btn_ref_run = ttk.Button(ref_btns, text="Run reflection autofill", style="Accent.TButton", command=self.on_run_reflection)
         self.btn_ref_run.pack(side="left", ipadx=8)
 
         # --- Right: Previews + logs
-        ttk.Label(right, text="Preview", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(right, text="Preview", style="PanelHeader.TLabel").pack(anchor="w")
 
         self.preview_tabs = ttk.Notebook(right)
         self.preview_tabs.pack(fill="both", expand=False, pady=(6, 10))
 
-        prev_rec = ttk.Frame(self.preview_tabs, padding=6)
-        prev_ref = ttk.Frame(self.preview_tabs, padding=6)
+        prev_rec = ttk.Frame(self.preview_tabs, padding=6, style="Surface.TFrame")
+        prev_ref = ttk.Frame(self.preview_tabs, padding=6, style="Surface.TFrame")
         self.preview_tabs.add(prev_rec, text="Record")
         self.preview_tabs.add(prev_ref, text="Reflection")
 
         self.txt_preview_record = tk.Text(prev_rec, height=10, wrap="word")
         self.txt_preview_record.pack(fill="both", expand=True)
+        self.txt_preview_record.configure(**text_style)
         self.txt_preview_record.configure(state="disabled")
 
         # Reflection preview: summary + content
         ttk.Label(prev_ref, text="Content Summary (20 words)").pack(anchor="w")
         self.txt_preview_summary = tk.Text(prev_ref, height=3, wrap="word")
         self.txt_preview_summary.pack(fill="x", expand=False, pady=(4, 8))
+        self.txt_preview_summary.configure(**text_style)
         self.txt_preview_summary.configure(state="disabled")
 
         ttk.Label(prev_ref, text="Reflection content (>= 550 words)").pack(anchor="w")
         self.txt_preview_reflection = tk.Text(prev_ref, height=8, wrap="word")
         self.txt_preview_reflection.pack(fill="both", expand=True, pady=(4, 0))
+        self.txt_preview_reflection.configure(**text_style)
         self.txt_preview_reflection.configure(state="disabled")
 
-        ttk.Label(right, text="Logs", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(right, text="Logs", style="PanelHeader.TLabel").pack(anchor="w")
         self.txt_log = tk.Text(right, height=14, wrap="word")
         self.txt_log.pack(fill="both", expand=True, pady=(6, 0))
+        self.txt_log.configure(**text_style)
         self.txt_log.configure(state="disabled")
 
-        footer = ttk.Frame(root)
+        footer = ttk.Frame(root, style="App.TFrame")
         footer.pack(fill="x", pady=(10, 0))
         self.btn_stop = ttk.Button(footer, text="Close browser (manual)", command=self.on_hint_stop)
         self.btn_stop.pack(side="left")
-        ttk.Label(footer, text="V5.0.0 - Records + Reflection + Weekly Batch (DeepSeek)").pack(side="left", padx=(12, 0))
+        ttk.Label(
+            footer,
+            text="V5.0.0 - Records + Reflection + Weekly Batch (DeepSeek)",
+            style="Footer.TLabel",
+        ).pack(side="left", padx=(12, 0))
 
     # ---------- logging / previews ----------
 
